@@ -6,7 +6,7 @@ The system is designed to avoid unnecessary inference while meaningful muscle ac
 
 System Architecture
 
-flowchart TD
+flowchart LR
     A[EMG Samples] --> B[Magnitude]
     B --> C[FIFO Buffer]
     C --> D[Sliding Window Accumulator]
@@ -42,11 +42,11 @@ $$
 
 where:
 
-$N$ is the detector window size.
+$N$ is the detector window size
 
-$x[n]$ is the newest sample.
+$x[n]$ is the newest sample
 
-$x[n-N]$ is the oldest sample leaving the window.
+$x[n-N]$ is the oldest sample leaving the window
 
 A FIFO stores previous magnitudes so the oldest value can be removed as each new value enters the window.
 
@@ -70,33 +70,59 @@ This hysteresis prevents rapid switching when the signal fluctuates near a singl
 
 The event detector therefore follows the approximate datapath:
 
-flowchart TD
-    A[EMG Sample] --> B[Magnitude]
-    B --> C[FIFO]
-    B -->|New magnitude| D[Sliding Sum]
-    C -->|Oldest magnitude| D
-    D --> E[Threshold Comparator]
-    F[Threshold MUX] --> E
-    E --> G[Hysteresis FSM]
-    G -->|State| F
-    G --> H[event_out]
+EMG Sample
+    |
+    v
+Magnitude
+    |
+    v
+FIFO -----> Oldest Magnitude
+    |              |
+    +-------> Sliding Sum
+                 |
+                 v
+          Threshold Comparator
+                 ^
+                 |
+          Threshold MUX
+                 |
+                 v
+           Hysteresis FSM
+                 |
+                 v
+             event_out
 
 Neural-Network Accelerator
 
 When the event detector enters the Active state, active EMG samples are collected for neural-network inference.
 
-The accelerator operates on fixed-size windows of 64 samples.
+The accelerator operates on fixed-size windows of:
+
+$$
+64\text{ samples}
+$$
 
 The 64-sample window is not a limit on the duration of an EMG event.
 
 If the event remains active after one inference window, the system collects another 64 samples and performs another inference.
 
-flowchart TD
-    A[Event becomes active] --> B[Collect 64 samples]
-    B --> C[Run inference]
-    C --> D{Event still active?}
-    D -->|Yes| B
-    D -->|No| E[Finish]
+Event becomes active
+        |
+        v
+Collect 64 samples
+        |
+        v
+Run inference
+        |
+        v
+Is event still active?
+     /       \
+   Yes        No
+    |          |
+    v          v
+Collect      Finish
+next 64
+samples
 
 The event detector FSM and the accelerator window controller operate independently.
 
@@ -114,7 +140,7 @@ The hardware therefore uses MAC units to perform neural-network layer computatio
 
 The initial classifier will use a compact feed-forward neural network suitable for FPGA implementation.
 
-A typical layer sequence will have the form:
+A typical layer will have the form:
 
 $$
 \text{Linear} \rightarrow \text{Activation} \rightarrow \text{Linear}
@@ -123,7 +149,7 @@ $$
 ReLU is currently the primary activation candidate because of its very low hardware cost:
 
 $$
-\operatorname{ReLU}(x) = \max(0, x)
+\operatorname{ReLU}(x)=\max(0,x)
 $$
 
 Model training and quantization will be performed in software before weights and parameters are transferred to the RTL accelerator.
@@ -134,27 +160,28 @@ The accelerator is intended to use low-precision integer arithmetic, with INT8 c
 
 The planned training flow is:
 
-EMG dataset
-
-Neural-network training
-
-Quantization-aware training
-
-INT8 parameters
-
-RTL accelerator
-
-FPGA inference
+EMG Dataset
+     |
+     v
+Neural Network Training
+     |
+     v
+Quantization-Aware Training
+     |
+     v
+INT8 Parameters
+     |
+     v
+RTL Accelerator
+     |
+     v
+FPGA Inference
 
 Quantization-aware training will be used to reduce the accuracy loss associated with low-precision inference.
 
 Current RTL Modules
 
 Event Detector
-
-Module
-
-Purpose
 
 magnitude.sv
 
@@ -170,7 +197,10 @@ Implements address/pointer control used by the FIFO.
 
 slider.sv
 
-Updates the running activity sum using the equation below.
+Updates the running activity sum using:
+
+m_{\text{old}}
+$$
 
 threshold_mux.sv
 
@@ -188,17 +218,7 @@ event_detector.sv
 
 Integrates the event-detector datapath and control logic.
 
-The sliding-sum update implemented by slider.sv is:
-
-$$
-S_{\text{next}} = S_{\text{current}} + m_{\text{new}} - m_{\text{old}}
-$$
-
 Accelerator
-
-Module
-
-Purpose
 
 mac_unit.sv
 
@@ -328,38 +348,50 @@ Long-Term SoC Architecture
 
 The intended complete system is:
 
-EMG sensors
-
-Signal acquisition
-
-Event detector
-
-64-sample active window
-
-Quantized neural-network accelerator
-
-RISC-V processor
-
-Gesture output / application
+EMG Sensors
+     |
+     v
+Signal Acquisition
+     |
+     v
+Event Detector
+     |
+     v
+64-Sample Active Window
+     |
+     v
+Quantized Neural-Network Accelerator
+     |
+     v
+RISC-V Processor
+     |
+     v
+Gesture Output / Application
 
 The RISC-V processor will eventually provide system-level control while the custom accelerator performs the computationally intensive neural-network inference.
 
 Planned Repository Structure
 
 event-driven-emg-soc/
+|
 ├── rtl/
 │   ├── event_detector/
 │   ├── accelerator/
 │   └── soc/
+|
 ├── tb/
 │   ├── event_detector/
 │   └── accelerator/
+|
 ├── ml/
 │   ├── preprocessing/
 │   ├── training/
 │   └── quantization/
+|
 ├── fpga/
+|
 ├── docs/
+|
 ├── README.md
 └── .gitignore
 
