@@ -1,0 +1,23 @@
+# HDL simulator and waveform output
+*.vcd
+*.fst
+*.wlf
+*.wdb
+*.ucdb
+*.log
+*.jou
+*.key
+transcript
+work/
+xsim.dir/
+.Xil/
+isim/
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Local raw data
+1_raw_data_13-12_22.03.16.txt
