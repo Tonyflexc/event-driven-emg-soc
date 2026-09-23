@@ -102,7 +102,7 @@ When the event detector enters the Active state, active EMG samples are collecte
 The accelerator operates on fixed-size windows of:
 
 \[
-64 \text{ samples}
+64 samples
 \]
 
 The 64-sample window is not a limit on the duration of an EMG event.
