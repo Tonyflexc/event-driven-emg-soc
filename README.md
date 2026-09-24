@@ -9,8 +9,8 @@ The system is designed to avoid unnecessary inference while meaningful muscle ac
 ```mermaid
 flowchart LR
     A[EMG Samples] --> B[Magnitude]
-    B --> C[FIFO Buffer]
-    C --> D[Sliding Window Accumulator]
+    B --> C[FIFO Buffer] --> J
+    B --> D[Sliding Window Accumulator]
     D --> E[Comparator]
     F[Threshold MUX] --> E
     E --> G[Hysteresis FSM]
@@ -33,21 +33,21 @@ The event detector estimates EMG activity using the magnitude of incoming signed
 
 For each sample:
 
-\[
+```math
 m[n] = |x[n]|
-\]
+```
 
 Instead of recomputing an entire window sum for every new sample, the detector uses a sliding-window accumulator:
 
-\[
+```math
 S[n] = S[n-1] + |x[n]| - |x[n-N]|
-\]
+```
 
 where:
 
-- \(N\) is the detector window size
-- \(x[n]\) is the newest sample
-- \(x[n-N]\) is the oldest sample leaving the window
+- `N` is the detector window size
+- `x[n]` is the newest sample
+- `x[n-N]` is the oldest sample leaving the window
 
 A FIFO stores previous magnitudes so the oldest value can be removed as each new value enters the window.
 
@@ -139,9 +139,9 @@ The neural-network accelerator is being developed around quantized integer arith
 
 The core computational primitive is the multiply-accumulate operation:
 
-\[
+$$
 y = \sum_i w_i x_i + b
-\]
+$$
 
 The hardware therefore uses MAC units to perform neural-network layer computations.
 
@@ -149,16 +149,15 @@ The initial classifier will use a compact feed-forward neural network suitable f
 
 A typical layer will have the form:
 
-\[
+$$
 \text{Linear} \rightarrow \text{Activation} \rightarrow \text{Linear}
-\]
+$$
 
 ReLU is currently the primary activation candidate because of its very low hardware cost:
 
-\[
-\operatorname{ReLU}(x)=\max(0,x)
-\]
-
+```math
+ReLU(x) = \max(0,x)
+```
 Model training and quantization will be performed in software before weights and parameters are transferred to the RTL accelerator.
 
 ---
@@ -212,7 +211,7 @@ Implements address/pointer control used by the FIFO.
 
 Updates the running activity sum using:
 
-\[
+```math
 S_{\text{next}}
 =
 S_{\text{current}}
@@ -220,7 +219,7 @@ S_{\text{current}}
 m_{\text{new}}
 -
 m_{\text{old}}
-\]
+```
 
 `threshold_mux.sv`
 
