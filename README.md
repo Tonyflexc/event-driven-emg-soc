@@ -398,4 +398,4 @@ event-driven-emg-soc/
 This project is under active development.
 
 The current focus is completing the event-driven signal-processing pipeline and developing the first quantized neural-network accelerator. The neural-network architecture, numerical precision, accelerator microarchitecture, and SoC integration may evolve as simulation and FPGA benchmarking progress.
-````
+
