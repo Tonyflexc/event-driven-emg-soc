@@ -1,0 +1,8 @@
+Source: emg+data+for+gestures+zip.zip; 72 recordings, 36 subjects.
+Windows: 23207. Counts by class: {1: 3835, 2: 3726, 3: 3827, 4: 3856, 5: 3865, 6: 3887, 7: 211}.
+Nonoverlapping 64-sample windows within each original contiguous labeled segment. Class 0 (unmarked) excluded. Classes 1–7 retained, including hand at rest (1) and extended palm (7, only some subjects). Incomplete segment tails discarded. One final row with missing class in subject 34 recording 1 excluded.
+24 features: MAV, WL and ZC per channel, 8 channels. MAV = mean absolute value. WL = sum of absolute differences of the 63 adjacent pairs. ZC = count of adjacent pairs with strictly opposite signs; exact zeros do not count and no noise threshold is applied.
+Original signal values retained without filtering, normalization, resampling, quantization or deduplication. 64 samples means 64 original rows; duration can vary and rows may repeat sensor values. Original timestamps in ms retained.
+Metadata indices are zero-based; end_sample_exclusive is exclusive. segment_id counts all original segments, including class 0.
+Train with the 24 MAV_ch*, WL_ch*, ZC_ch* columns only, class as target; use subject_id for subject-separated splits. Metadata are not classifier inputs. No classifier trained.
+Validation: finite input channels and output features; window counts reconciled against labeled samples and discarded tails; representative features checked using independent scalar calculations.
