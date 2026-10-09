@@ -145,12 +145,14 @@ $$
 
 The hardware therefore uses MAC units to perform neural-network layer computations.
 
-The initial classifier will use a compact feed-forward neural network suitable for FPGA implementation.
+The current candidate for hardware implementation is a compact two-hidden-layer multilayer perceptron (MLP) with a 24→32→16→6 architecture. The network uses 24 extracted EMG features as inputs and produces predictions for six gesture classes.
+
+The architecture is still being evaluated, with hardware implementation cost, classification accuracy, and generalization to unseen subjects guiding the final model selection.
 
 A typical layer will have the form:
 
 $$
-\text{Linear} \rightarrow \text{Activation} \rightarrow \text{Linear}
+24 \rightarrow 32 \rightarrow 16 \rightarrow 6
 $$
 
 ReLU is currently the primary activation candidate because of its very low hardware cost:
@@ -159,6 +161,39 @@ ReLU is currently the primary activation candidate because of its very low hardw
 ReLU(x) = \max(0,x)
 ```
 Model training and quantization will be performed in software before weights and parameters are transferred to the RTL accelerator.
+
+---
+
+## Machine Learning Experiments
+
+The current machine-learning pipeline processes 64-sample EMG windows from eight channels. Three time-domain features are extracted per channel:
+
+- Mean Absolute Value (MAV)
+- Waveform Length (WL)
+- Zero Crossings (ZC)
+
+This produces 24 input features per window.
+
+Models are evaluated using subject-wise training, validation, and test splits to measure generalization to previously unseen subjects.
+
+### Model Comparison
+
+- **Random Forest:** Established a baseline with approximately 84.5% test accuracy for six-class gesture recognition.
+- **One-Hidden-Layer MLP (24→32→6):** Implemented a feed-forward neural network from scratch using NumPy and evaluated its performance against the random forest.
+- **Two-Hidden-Layer MLP (24→32→16→6):** Experimented with network depth, hidden-layer widths, learning rates, and training durations. The current preferred configuration achieved approximately 77.8% validation accuracy and 84.8% test accuracy.
+
+The two-hidden-layer MLP is currently preferred for its relatively compact architecture and suitability for MAC-based hardware implementation.
+
+Recurrent neural networks are also being explored as a possible alternative for modeling temporal dependencies in EMG signals.
+
+### Implementation Files
+
+The current Python experiments are available in `emg learning/`:
+
+- `train_rf.py` — Random forest training and evaluation
+- `fnn.py` — Initial feed-forward neural-network experiments
+- `fnn2.py` — Additional MLP architecture experiments
+- `emg_processing_notes.txt` — EMG processing notes
 
 ---
 
@@ -172,13 +207,19 @@ The planned training flow is:
 EMG Dataset
      |
      v
-Neural Network Training
+Model Training and Evaluation
      |
      v
-Quantization-Aware Training
+Final Model Selection
      |
      v
-INT8 Parameters
+INT8 Quantization
+     |
+     v
+Integer Inference Validation
+     |
+     v
+Weight and Bias Export
      |
      v
 RTL Accelerator
@@ -187,7 +228,7 @@ RTL Accelerator
 FPGA Inference
 ```
 
-Quantization-aware training will be used to reduce the accuracy loss associated with low-precision inference.
+Post-training quantization and quantization-aware training will be evaluated as possible approaches for converting the selected model to INT8 arithmetic. Quantized inference will first be validated in software before integration with the SystemVerilog accelerator.
 
 ---
 
@@ -301,12 +342,16 @@ The project is intended to explore:
 
 ### Machine Learning
 
-- [ ] Train baseline EMG classifier
-- [ ] Evaluate model architecture
-- [ ] Quantization-aware training
+- [x] Extract MAV, WL, and ZC features from EMG windows
+- [x] Train and evaluate random forest baseline
+- [x] Implement one-hidden-layer MLP
+- [x] Experiment with two-hidden-layer MLP architectures
+- [x] Evaluate models using subject-wise data splits
+- [ ] Evaluate recurrent neural networks
+- [ ] Finalize model architecture
+- [ ] INT8 quantization
 - [ ] Export quantized weights and biases
 - [ ] Validate hardware/software numerical equivalence
-
 ### System Integration
 
 - [ ] Connect event detector to accelerator
@@ -395,7 +440,8 @@ event-driven-emg-soc/
 
 ## Project Status
 
-This project is under active development.
+The project is under active development.
 
-The current focus is completing the event-driven signal-processing pipeline and developing the first quantized neural-network accelerator. The neural-network architecture, numerical precision, accelerator microarchitecture, and SoC integration may evolve as simulation and FPGA benchmarking progress.
+The event-detector RTL and initial MAC datapath components have been implemented. Machine-learning experiments have established a random forest baseline and evaluated one- and two-hidden-layer MLP architectures, with a compact two-hidden-layer MLP currently preferred.
 
+Current work focuses on exploring recurrent neural networks, finalizing the classification architecture, and preparing for INT8 quantization. Subsequent development will focus on integrating the selected model into the RTL accelerator, FPGA verification, and eventual RISC-V-based SoC integration.
