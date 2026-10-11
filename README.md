@@ -1,447 +1,287 @@
 # event-driven-emg-soc
 
-An event-driven SystemVerilog architecture for real-time EMG gesture recognition, combining low-cost signal activity detection with a quantized neural-network accelerator.
+An event-driven SystemVerilog architecture for EMG gesture recognition, combining a lightweight activity detector with a planned quantized neural-network accelerator and eventual RISC-V control.
 
-The system is designed to avoid unnecessary inference while meaningful muscle activity is absent. Once EMG activity is detected, the system collects fixed-size active-signal windows and forwards them to a hardware neural-network accelerator for gesture classification.
+The system monitors muscle activity continuously and enables neural inference while an event is active. The current accelerator direction is a streaming recurrent neural network (RNN) that processes raw eight-channel EMG samples.
+
+**Current milestone:** the event-detector RTL has passed directed simulation, and FPGA bring-up has been completed on a Tang Primer 25K using a blinking-LED design. The neural-network accelerator and full system integration are still under development.
+
+## Progress at a Glance
+
+| Component | Current status |
+| --- | --- |
+| Event detector | RTL implemented and checked with directed simulation |
+| FPGA bring-up | Gowin synthesis, place and route, programming, and on-board LED demonstration completed |
+| Random forest baseline | Approximately 84.5% held-out-subject test accuracy |
+| Two-hidden-layer NumPy MLP | Approximately 77.8% validation accuracy and 84.8% test accuracy |
+| Streaming RNN | Current model direction; software implementation and evaluation in progress |
+| Accelerator | Initial MAC and register components implemented; complete RNN datapath and controller pending |
+| INT8 inference | Planned |
+| RISC-V SoC integration | Planned |
 
 ## System Architecture
 
+The activity detector and gesture classifier have separate responsibilities:
+
+- **Event detector:** determine whether the incoming signal indicates muscle activity.
+- **Neural network:** predict the gesture from the incoming EMG sequence.
+- **System controller:** coordinate sampling, inference, recurrent state, and output.
+
 ```mermaid
-flowchart LR
-    A[EMG Samples] --> B[Magnitude]
-    B --> C[FIFO Buffer] --> J
-    B --> D[Sliding Window Accumulator]
-    D --> E[Comparator]
-    F[Threshold MUX] --> E
-    E --> G[Hysteresis FSM]
-    G --> H[Event Active]
-    H --> I[64-Sample Window Controller]
-    I --> J[Quantized NN Accelerator]
-    J --> K[Gesture Classification]
+flowchart TD
+    A["EMG sample stream"] --> B["64-sample event detector — RTL implemented"]
+    A --> C["Raw eight-channel input path — planned"]
+    B --> D["event_active"]
+    D -. "enables inference — planned integration" .-> E["Streaming RNN accelerator — planned"]
+    C --> E
+    E --> F["Gesture prediction"]
 ```
 
-The design consists of two primary subsystems:
+The 64-sample sliding window belongs to the event detector. The current RNN direction carries hidden state between successive samples and does not require a fixed 64-sample inference window.
 
-1. An event detector that continuously monitors EMG activity.
-2. A neural-network accelerator that performs gesture classification only when an event is active.
-
----
+The earlier feature-based MLP experiments still use fixed 64-sample windows. Those experiments remain useful software baselines.
 
 ## Event Detector
 
-The event detector estimates EMG activity using the magnitude of incoming signed samples.
+### Magnitude and Sliding Sum
 
-For each sample:
+For each accepted signed sample, the detector computes an unsigned magnitude:
 
-```math
+$$
 m[n] = |x[n]|
-```
+$$
 
-Instead of recomputing an entire window sum for every new sample, the detector uses a sliding-window accumulator:
+It maintains the sum of magnitudes over a 64-sample detection window:
 
-```math
-S[n] = S[n-1] + |x[n]| - |x[n-N]|
-```
+$$
+S[n] = S[n-1] + m[n] - m[n-64]
+$$
 
-where:
+A circular history buffer supplies the delayed value leaving the window. Each update requires one addition and one subtraction instead of recomputing all 64 terms.
 
-- `N` is the detector window size
-- `x[n]` is the newest sample
-- `x[n-N]` is the oldest sample leaving the window
+Here, `n` counts accepted samples. Invalid samples must not advance the sample history or update the detector's sample-driven state.
 
-A FIFO stores previous magnitudes so the oldest value can be removed as each new value enters the window.
+The current detector uses signed 8-bit samples. The most negative input, `-128`, has an unsigned magnitude of `128`. A full window of those samples therefore produces:
 
-This reduces the sliding-window update to one addition and one subtraction per valid sample.
+$$
+64 \times 128 = 8192
+$$
 
-### Hysteresis Detection
+This boundary case is included in the directed simulation checks.
 
-The activity level is evaluated using separate high and low thresholds.
+### Hysteresis and State Control
 
-The detector uses three states:
+The detector uses **Idle**, **Active**, and **Cooldown** states, with separate high and low activity thresholds.
 
-- **Idle**
-- **Active**
-- **Cooldown**
+A threshold multiplexer selects the threshold used by the comparator according to the current state. The FSM controls `event_active`, providing hysteresis so signal fluctuations near a threshold do not repeatedly toggle inference.
 
-A threshold multiplexer selects the appropriate threshold depending on the current detector state.
+### Simulation Progress
 
-This hysteresis prevents rapid switching when the signal fluctuates near a single threshold.
+The event-detector simulation work has covered:
 
-The event detector therefore follows the approximate datapath:
+| Check | Behavior exercised |
+| --- | --- |
+| Reset and startup | Initial state, history handling, and accumulator initialization |
+| Sliding accumulation | Addition of the newest magnitude and removal of the delayed magnitude |
+| Activation and deactivation | State transitions as signal activity rises and falls |
+| Hysteresis | Different activation and release thresholds |
+| Pointer wraparound | Circular history addressing across the buffer boundary |
+| Invalid samples | Sliding sum and FSM hold when no sample is accepted |
+| Maximum magnitude | Signed `-128` handling and a 64-sample sum of `8192` |
 
-```text
-EMG Sample
-    |
-    v
-Magnitude
-    |
-    v
-FIFO -----> Oldest Magnitude
-    |              |
-    +-------> Sliding Sum
-                 |
-                 v
-          Threshold Comparator
-                 ^
-                 |
-          Threshold MUX
-                 |
-                 v
-           Hysteresis FSM
-                 |
-                 v
-             event_out
-```
+These are directed RTL simulation results. Live EMG testing and hardware verification of the complete signal-processing path remain upcoming integration steps.
 
----
+## FPGA Bring-Up
 
-## Neural-Network Accelerator
+Initial hardware bring-up has been completed on a **Tang Primer 25K** using **Gowin EDA**.
 
-When the event detector enters the Active state, active EMG samples are collected for neural-network inference.
+The completed flow includes:
 
-The accelerator operates on fixed-size windows of:
+- FPGA project and target-device setup.
+- Synthesis and place and route for the LED bring-up design.
+- Pin-constraint troubleshooting.
+- Bitstream generation and FPGA programming.
+- An observed blinking LED on the board.
 
-\[
-64 samples
-\]
+The demonstration uses a clock-driven counter to drive an LED. It establishes a working build and programming flow; hardware gesture recognition will require the acquisition path, event detector, and accelerator to be integrated and tested.
 
-The 64-sample window is not a limit on the duration of an EMG event.
+## Machine Learning Experiments
 
-If the event remains active after one inference window, the system collects another 64 samples and performs another inference.
+### Feature-Based Baselines
 
-```text
-Event becomes active
-        |
-        v
-Collect 64 samples
-        |
-        v
-Run inference
-        |
-        v
-Is event still active?
-     /       \
-   Yes        No
-    |          |
-    v          v
-Collect      Finish
-next 64
-samples
-```
+The initial software pipeline extracts three time-domain features from each of eight EMG channels over a 64-sample window:
 
-The event detector FSM and the accelerator window controller operate independently.
+- **Mean Absolute Value (MAV)**
+- **Waveform Length (WL)**
+- **Zero Crossings (ZC)**
 
----
+This produces **24 features per window**. Models are evaluated with subject-wise training, validation, and test splits to assess generalization to unseen subjects.
 
-## Accelerator Architecture
+| Model | Architecture or input | Validation accuracy | Test accuracy |
+| --- | --- | --- | --- |
+| Random forest | 24 extracted features | — | ~84.5% |
+| NumPy MLP, one hidden layer | 24 → 32 → 6 | — | — |
+| NumPy MLP, two hidden layers | 24 → 32 → 16 → 6 | ~77.8% | ~84.8% |
+| Streaming RNN | 8 → recurrent hidden layer (32) → 6 | Pending | Pending |
 
-The neural-network accelerator is being developed around quantized integer arithmetic.
+The MLPs were implemented from scratch using NumPy, including forward propagation, loss calculation, backpropagation, and parameter updates. Experiments explored network depth, hidden-layer widths, learning rates, and training duration.
 
-The core computational primitive is the multiply-accumulate operation:
+The reported accuracies are software results from the feature-based experiments. RNN evaluation and quantized-inference results are still pending.
+
+### Current RNN Direction
+
+The current candidate is a compact, streaming, many-to-many RNN:
+
+$$
+8 \rightarrow \mathrm{RNN}(32) \rightarrow 6
+$$
+
+Each timestep receives one raw sample from each of the eight EMG channels. The network combines those inputs with its previous hidden state and produces six gesture scores.
+
+Its recurrent computation has the form:
+
+$$
+h_t = \phi(W_x x_t + W_h h_{t-1} + b_h)
+$$
+
+$$
+z_t = W_y h_t + b_y
+$$
+
+where `x_t` is the eight-channel input, `h_t` is the recurrent state, and `z_t` contains the output scores.
+
+The intended event-driven integration initializes recurrent state at the start of an active event and carries it across successive samples while that event continues. The surrounding controller handles event boundaries; the RNN performs gesture prediction.
+
+Software work currently focuses on the forward pass and backpropagation through time. Model accuracy and implementation cost will determine whether this RNN becomes the final hardware model.
+
+### Experiment Files
+
+The existing feature-based Python experiments are documented in `emg learning/`:
+
+| File | Purpose |
+| --- | --- |
+| `train_rf.py` | Random forest training and evaluation |
+| `fnn.py` | Initial feed-forward neural-network experiments |
+| `fnn2.py` | Additional MLP architecture experiments |
+| `emg_processing_notes.txt` | EMG processing notes |
+
+## Accelerator Development
+
+Initial reusable accelerator components have been implemented, including a MAC unit, a MAC datapath, and accumulator/register blocks.
+
+The core operation is:
 
 $$
 y = \sum_i w_i x_i + b
 $$
 
-The hardware therefore uses MAC units to perform neural-network layer computations.
+A complete RNN accelerator also needs:
 
-The current candidate for hardware implementation is a compact two-hidden-layer multilayer perceptron (MLP) with a 24→32→16→6 architecture. The network uses 24 extracted EMG features as inputs and produces predictions for six gesture classes.
+- Scheduling for the input-to-hidden, hidden-to-hidden, and hidden-to-output computations.
+- Hidden-state storage and update control.
+- Weight and bias storage.
+- Activation-function hardware.
+- Fixed-point scaling, rounding, and accumulator-width decisions.
+- Sample acceptance and output-valid control.
+- Integration with the event detector and the eight-channel input stream.
 
-The architecture is still being evaluated, with hardware implementation cost, classification accuracy, and generalization to unseen subjects guiding the final model selection.
+The initial MAC components are building blocks for this work. The complete recurrent accelerator has not yet been implemented.
 
-A typical layer will have the form:
+## Quantization Plan
 
-$$
-24 \rightarrow 32 \rightarrow 16 \rightarrow 6
-$$
+**INT8 weights and activations** remain the target for low-precision inference. Accumulation will require wider arithmetic, with the exact formats selected and checked against the chosen model.
 
-ReLU is currently the primary activation candidate because of its very low hardware cost:
+The planned flow is:
 
-```math
-ReLU(x) = \max(0,x)
-```
-Model training and quantization will be performed in software before weights and parameters are transferred to the RTL accelerator.
+1. Complete floating-point model training and evaluation.
+2. Select the final network and activation function.
+3. Evaluate post-training quantization or quantization-aware training.
+4. Validate integer inference in software.
+5. Export weights, biases, and scaling parameters.
+6. Implement the corresponding RTL.
+7. Compare RTL results against the integer software reference.
+8. Integrate and test inference on the FPGA.
 
----
+Quantization and hardware/software numerical equivalence are future milestones.
 
-## Machine Learning Experiments
+## RTL Components
 
-The current machine-learning pipeline processes 64-sample EMG windows from eight channels. Three time-domain features are extracted per channel:
+| File | Role |
+| --- | --- |
+| `magnitude.sv` | Signed-sample magnitude calculation |
+| `fifo.sv` | Circular sample history for delayed-value access |
+| `pointer.sv` | Buffer address/pointer control |
+| `slider.sv` | Sliding-sum arithmetic |
+| `threshold_mux.sv` | State-dependent threshold selection |
+| `comparator.sv` | Activity comparison |
+| `fsm.sv` | Idle, Active, and Cooldown control |
+| `event_detector.sv` | Event-detector integration |
+| `mac_unit.sv` | Initial multiply-accumulate component |
+| `mac_datapath.sv` | Initial MAC datapath |
+| `acc_register.sv` | Accumulation-result storage |
+| `register.sv` | Reusable register component |
 
-- Mean Absolute Value (MAV)
-- Waveform Length (WL)
-- Zero Crossings (ZC)
+## Development Checklist
 
-This produces 24 input features per window.
+### Event Detector and Verification
 
-Models are evaluated using subject-wise training, validation, and test splits to measure generalization to previously unseen subjects.
-
-### Model Comparison
-
-- **Random Forest:** Established a baseline with approximately 84.5% test accuracy for six-class gesture recognition.
-- **One-Hidden-Layer MLP (24→32→6):** Implemented a feed-forward neural network from scratch using NumPy and evaluated its performance against the random forest.
-- **Two-Hidden-Layer MLP (24→32→16→6):** Experimented with network depth, hidden-layer widths, learning rates, and training durations. The current preferred configuration achieved approximately 77.8% validation accuracy and 84.8% test accuracy.
-
-The two-hidden-layer MLP is currently preferred for its relatively compact architecture and suitability for MAC-based hardware implementation.
-
-Recurrent neural networks are also being explored as a possible alternative for modeling temporal dependencies in EMG signals.
-
-### Implementation Files
-
-The current Python experiments are available in `emg learning/`:
-
-- `train_rf.py` — Random forest training and evaluation
-- `fnn.py` — Initial feed-forward neural-network experiments
-- `fnn2.py` — Additional MLP architecture experiments
-- `emg_processing_notes.txt` — EMG processing notes
-
----
-
-## Quantization
-
-The accelerator is intended to use low-precision integer arithmetic, with INT8 currently targeted for neural-network weights and activations.
-
-The planned training flow is:
-
-```text
-EMG Dataset
-     |
-     v
-Model Training and Evaluation
-     |
-     v
-Final Model Selection
-     |
-     v
-INT8 Quantization
-     |
-     v
-Integer Inference Validation
-     |
-     v
-Weight and Bias Export
-     |
-     v
-RTL Accelerator
-     |
-     v
-FPGA Inference
-```
-
-Post-training quantization and quantization-aware training will be evaluated as possible approaches for converting the selected model to INT8 arithmetic. Quantized inference will first be validated in software before integration with the SystemVerilog accelerator.
-
----
-
-## Current RTL Modules
-
-### Event Detector
-
-`magnitude.sv`
-
-Computes the absolute magnitude of signed EMG samples.
-
-`fifo.sv`
-
-Stores previous sample magnitudes and provides historical samples required by the sliding-window computation.
-
-`pointer.sv`
-
-Implements address/pointer control used by the FIFO.
-
-`slider.sv`
-
-Updates the running activity sum using:
-
-```math
-S_{\text{next}}
-=
-S_{\text{current}}
-+
-m_{\text{new}}
--
-m_{\text{old}}
-```
-
-`threshold_mux.sv`
-
-Selects the appropriate hysteresis threshold according to the detector state.
-
-`comparator.sv`
-
-Compares the current sliding-window activity level against the selected threshold.
-
-`fsm.sv`
-
-Implements the Idle, Active, and Cooldown event-detection states.
-
-`event_detector.sv`
-
-Integrates the event-detector datapath and control logic.
-
-### Accelerator
-
-`mac_unit.sv`
-
-Implements the core multiply-accumulate operation used during neural-network inference.
-
-`mac_datapath.sv`
-
-Implements the accelerator MAC datapath.
-
-`acc_register.sv`
-
-Stores intermediate accumulation results.
-
-`register.sv`
-
-General-purpose register module used within the RTL architecture.
-
-Additional accelerator modules are currently under development.
-
----
-
-## Design Goals
-
-The project is intended to explore:
-
-- Real-time EMG gesture recognition
-- Event-driven neural inference
-- Hardware-efficient EMG activity detection
-- Sliding-window signal processing
-- Quantized neural networks
-- FPGA neural-network acceleration
-- SystemVerilog RTL design
-- Low-power inference through conditional activation
-- RISC-V-controlled SoC integration
-
----
-
-## Development Status
-
-### Event Detector
-
-- [x] EMG magnitude calculation
+- [x] Magnitude calculation
+- [x] Circular sample history and pointer logic
 - [x] Sliding-window accumulator
-- [x] FIFO sample history
-- [x] FIFO pointer logic
-- [x] Threshold selection
-- [x] Comparator
+- [x] Threshold selection and comparator
 - [x] Hysteresis FSM
-- [x] Event detector integration
+- [x] Event-detector RTL integration
+- [x] Directed event-detector simulation checks
+- [ ] Live-input hardware verification
 
-### Neural-Network Accelerator
+### FPGA Bring-Up
 
-- [x] Initial MAC unit
-- [x] Initial MAC datapath
-- [x] Accumulator register
-- [ ] Complete accelerator datapath
-- [ ] Accelerator controller
-- [ ] Activation-function hardware
-- [ ] Weight and bias storage
-- [ ] 64-sample inference-window controller
+- [x] Gowin project setup
+- [x] Synthesis and place and route for the bring-up design
+- [x] FPGA programming
+- [x] On-board blinking-LED demonstration
+- [ ] Integrated EMG system build and timing closure
+- [ ] On-board gesture inference
 
 ### Machine Learning
 
-- [x] Extract MAV, WL, and ZC features from EMG windows
-- [x] Train and evaluate random forest baseline
-- [x] Implement one-hidden-layer MLP
-- [x] Experiment with two-hidden-layer MLP architectures
-- [x] Evaluate models using subject-wise data splits
-- [ ] Evaluate recurrent neural networks
-- [ ] Finalize model architecture
-- [ ] INT8 quantization
-- [ ] Export quantized weights and biases
-- [ ] Validate hardware/software numerical equivalence
-### System Integration
+- [x] MAV, WL, and ZC feature extraction
+- [x] Random forest baseline
+- [x] One- and two-hidden-layer NumPy MLP experiments
+- [x] Subject-wise model evaluation
+- [ ] Complete and evaluate the streaming RNN
+- [ ] Finalize the hardware model
+- [ ] Validate quantized integer inference
+- [ ] Export quantized parameters
 
-- [ ] Connect event detector to accelerator
-- [ ] Full RTL simulation
-- [ ] FPGA synthesis
-- [ ] Timing analysis
-- [ ] FPGA implementation
+### Accelerator and SoC
+
+- [x] Initial MAC unit and MAC datapath
+- [x] Accumulator and reusable register blocks
+- [ ] Complete accelerator datapath and controller
+- [ ] Recurrent hidden-state storage and control
+- [ ] Activation-function hardware
+- [ ] Weight and bias storage
+- [ ] Event-detector/accelerator integration
+- [ ] Hardware/software numerical equivalence
+- [ ] Multichannel signal-acquisition integration
 - [ ] RISC-V control integration
-- [ ] Real-time EMG testing
-
----
+- [ ] Real-time EMG system testing
 
 ## Tools
-
-Current development uses:
 
 - **SystemVerilog**
 - **Icarus Verilog**
 - **GTKWave**
-- **Python**
+- **Python / NumPy**
 - **Gowin EDA**
-- **Gowin FPGA hardware**
+- **Tang Primer 25K FPGA board**
 
-Python will be used for EMG preprocessing, neural-network training, quantization, model evaluation, and generation of parameters for the RTL accelerator.
+Python supports EMG preprocessing, model training, evaluation, quantization, and parameter export. SystemVerilog is used for the custom signal-processing and inference hardware.
 
----
+## Long-Term Goal
 
-## Long-Term SoC Architecture
+The intended SoC combines EMG acquisition, continuous event detection, a quantized streaming classifier, and a RISC-V processor for system-level control and application output.
 
-The intended complete system is:
+The project explores event-driven inference, FPGA signal processing, neural-network acceleration, and hardware/software integration. Reducing unnecessary inference during inactive periods is a design objective; power and end-to-end performance measurements will follow system integration.
 
-```text
-EMG Sensors
-     |
-     v
-Signal Acquisition
-     |
-     v
-Event Detector
-     |
-     v
-64-Sample Active Window
-     |
-     v
-Quantized Neural-Network Accelerator
-     |
-     v
-RISC-V Processor
-     |
-     v
-Gesture Output / Application
-```
-
-The RISC-V processor will eventually provide system-level control while the custom accelerator performs the computationally intensive neural-network inference.
-
----
-
-## Planned Repository Structure
-
-```text
-event-driven-emg-soc/
-|
-├── rtl/
-│   ├── event_detector/
-│   ├── accelerator/
-│   └── soc/
-|
-├── tb/
-│   ├── event_detector/
-│   └── accelerator/
-|
-├── ml/
-│   ├── preprocessing/
-│   ├── training/
-│   └── quantization/
-|
-├── fpga/
-|
-├── docs/
-|
-├── README.md
-└── .gitignore
-```
-
----
-
-## Project Status
-
-The project is under active development.
-
-The event-detector RTL and initial MAC datapath components have been implemented. Machine-learning experiments have established a random forest baseline and evaluated one- and two-hidden-layer MLP architectures, with a compact two-hidden-layer MLP currently preferred.
-
-Current work focuses on exploring recurrent neural networks, finalizing the classification architecture, and preparing for INT8 quantization. Subsequent development will focus on integrating the selected model into the RTL accelerator, FPGA verification, and eventual RISC-V-based SoC integration.
