@@ -21,3 +21,11 @@ Thumbs.db
 
 # Local raw data
 1_raw_data_13-12_22.03.16.txt
+
+/EMG_data_for_gestures-master/
+/emg learning/emg_features.csv
+/fpga/impl/
+*.gprj.user
+*.vvp
+__pycache__/
+*.pyc

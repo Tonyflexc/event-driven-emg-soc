@@ -1,54 +1,55 @@
 module event_detector (
     input  logic       clk,
-    input  logic       reset,
+    input  logic       rst,
     input  logic [7:0] sample,
     input  logic       sample_valid,
     output logic       active
 );
 
-    logic [7:0] magnitude_value;
+    logic [7:0] new_magnitude;
 
     magnitude #(.N(8)) mag_unit (
-        .in(sample),
-        .out(magnitude_value)
+        .new_sample(sample),
+        .out(new_magnitude)
 );
 
+    logic [7:0] old_sample;
 
-    logic [13:0] stored_sum; // running total from the register
-    logic [13:0] next_sum;   // adder result
+    buffer #(.DATA_WIDTH(8),
+             .ADDR_WIDTH(7)) buffer_unit (
+        .clk(clk), 
+        .rst(rst),                    
+        .wr_en(sample_valid),
+        .w_data(sample),
+        .event_detector_rd_data(old_sample),
+        .accel_rd_addr(7'd0),
+        .accel_rd_data(),
+        .current_w_ptr()
 
-    adder #(.N(14)) add_unit (
-        .a({6'b000000, magnitude_value}), // extend 8 bits to 14
-        .b(stored_sum),                    // previous accumulated sum
-        .sum(next_sum)
 );
 
-    logic [13:0] register_d;
-    logic        window_done;
+    logic [7:0] old_magnitude;
 
-    mux #(.N(14)) mux_unit (
-        .in1(14'b0),
-        .in2(next_sum),
-        .sel(window_done),
-        .out(register_d)
+    magnitude #(.N(8)) oldmag_unit (
+        .new_sample(old_sample),
+        .out(old_magnitude)
+);
+
+    logic [13:0] current_sum, next_sum;
+
+    slider #(.N(14)) slider_unit (
+        .new_magnitude(new_magnitude),
+        .old_magnitude(old_magnitude),
+        .current_sum(current_sum),
+        .next_sum(next_sum)
 );
 
     register #(.N(14)) accum_reg (
         .clk(clk),
         .en(sample_valid),
-        .reset(reset),
-        .d(register_d),
-        .q(stored_sum)
-);
- 
-    logic [5:0] count;
-
-    counter count_unit (
-        .clk(clk),
-        .reset(reset),
-        .sample_valid(sample_valid),
-        .count(count),
-        .window_done(window_done)
+        .rst(rst),
+        .d(next_sum),
+        .q(current_sum)
 );
 
     logic [13:0] threshold_value;
@@ -60,14 +61,15 @@ module event_detector (
 );
 
     comparator #(.N(14)) compare_unit (
-        .s(stored_sum),
+        .s(next_sum),
         .t(threshold_value),
         .out(above_threshold)
 );
 
     fsm state_unit (
         .clk(clk),
-        .reset(reset),
+        .rst(rst),
+        .sample_valid(sample_valid),
         .a(above_threshold),
         .y(active)
 );

@@ -1,0 +1,20 @@
+<?xml version="1" encoding="UTF-8"?>
+<!DOCTYPE gowin-fpga-project>
+<Project>
+    <Template>FPGA</Template>
+    <Version>5</Version>
+    <Device name="GW5A-25B" pn="GW5A-LV25MG121NC1/I0">gw5a25b-003</Device>
+    <FileList>
+        <File path="src/buffer.sv" type="file.verilog" enable="1"/>
+        <File path="src/comparator.sv" type="file.verilog" enable="1"/>
+        <File path="src/event_detector.sv" type="file.verilog" enable="1"/>
+        <File path="src/fsm.sv" type="file.verilog" enable="1"/>
+        <File path="src/magnitude.sv" type="file.verilog" enable="1"/>
+        <File path="src/register.sv" type="file.verilog" enable="1"/>
+        <File path="src/slider.sv" type="file.verilog" enable="1"/>
+        <File path="src/threshold_mux.sv" type="file.verilog" enable="1"/>
+        <File path="src/top.sv" type="file.verilog" enable="1"/>
+        <File path="src/blink.cst" type="file.cst" enable="1"/>
+        <File path="src/top.sdc" type="file.sdc" enable="1"/>
+    </FileList>
+</Project>

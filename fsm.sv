@@ -1,14 +1,14 @@
-module fsm (input logic clk, reset, a,
+module fsm (input logic clk, rst, a, sample_valid,
             output logic y
             );
 
     typedef enum logic {S0, S1} statetype;
     statetype state, nextstate;
 
-    always_ff @(posedge clk, posedge reset) begin
-        if (reset) state <= S0;
+    always_ff @(posedge clk, posedge rst) begin
+        if (rst) state <= S0;
 
-        else 
+        else if (sample_valid)
             state <= nextstate;
          end
     always_comb begin
