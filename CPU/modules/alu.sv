@@ -5,7 +5,7 @@ module alu #(parameter N = 32)
              output logic zero
             );
 
-        always_comb begin 
+        always @(*) begin 
             case (alu_ctrl)
                 0: result = a + b;
                 1: result = a - b;
